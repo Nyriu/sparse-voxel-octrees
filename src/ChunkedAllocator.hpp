@@ -40,7 +40,7 @@ class ChunkedAllocator {
 
     size_t _size;
     std::vector<std::unique_ptr<Type[]>> _data;
-    std::vector<InsertionPoint> _insertions;
+    std::vector<InsertionPoint> _insertions; // TODO meaning
 
 public:
     ChunkedAllocator() : _size(0) {}

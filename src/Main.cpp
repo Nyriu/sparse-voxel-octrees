@@ -54,7 +54,7 @@ freely, subject to the following restrictions:
 #endif
 
 /* Number of threads to use - adapt this to your platform for optimal results */
-static const int NumThreads = 16;
+static const int NumThreads = 1; //16;
 /* Screen resolution */
 static const int GWidth  = 1280;
 static const int GHeight = 720;
@@ -147,9 +147,9 @@ void renderBatch(BatchData *data) {
     VoxelOctree *tree = data->tree;
 
     Mat4 tform;
-    MatrixStack::get(INV_MODELVIEW_STACK, tform);
+    MatrixStack::get(INV_MODELVIEW_STACK, tform); // TODO analyze from here
 
-    Vec3 pos = tform*Vec3() + tree->center() + Vec3(1.0);
+    Vec3 pos = tform*Vec3() + tree->center() + Vec3(1.0); // capire il tform
 
     tform.a14 = tform.a24 = tform.a34 = 0.0f;
 
@@ -238,7 +238,7 @@ int renderLoop(void *threadData) {
                 pitch = std::fmod(pitch - my, 360.0f);
                 yaw = std::fmod(yaw + (std::fabs(pitch) > 90.0f ? mx : -mx), 360.0f);
 
-                     if (pitch >  180.0f) pitch -= 360.0f;
+                if (pitch >  180.0f) pitch -= 360.0f;
                 else if (pitch < -180.0f) pitch += 360.0f;
 
                 MatrixStack::set(MODEL_STACK, Mat4::rotXYZ(Vec3(pitch, 0.0f, 0.0f))*

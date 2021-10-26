@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 project(sparse-voxel-octrees)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 
 include(CXX11)

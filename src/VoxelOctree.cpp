@@ -29,9 +29,16 @@ freely, subject to the following restrictions:
 #include "third-party/lz4.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cstddef>
+#include <ios>
 #include <iostream>
 #include <stdio.h>
 #include <cmath>
+
+#include <bitset>
+#include <inttypes.h>
+
 
 static const uint32 BitCount[] = {
     0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
@@ -126,10 +133,10 @@ VoxelOctree::VoxelOctree(VoxelData *voxels)
 : _voxels(voxels)
 {
     std::unique_ptr<ChunkedAllocator<uint32>> octreeAllocator(new ChunkedAllocator<uint32>());
-    octreeAllocator->pushBack(0);
+    octreeAllocator->pushBack(0); // reserve root's childdesc
 
     buildOctree(*octreeAllocator, 0, 0, 0, _voxels->sideLength(), 0);
-    (*octreeAllocator)[0] |= 1 << 18;
+    (*octreeAllocator)[0] |= 1 << 18; // set 19th bit of root's childdesc // means offset = 1
 
     _octreeSize = octreeAllocator->size() + octreeAllocator->insertionCount();
     _octree = octreeAllocator->finalize();
@@ -145,7 +152,7 @@ uint64 VoxelOctree::buildOctree(ChunkedAllocator<uint32> &allocator, int x, int 
     int posY[] = {y + halfSize, y + halfSize, y, y, y + halfSize, y + halfSize, y, y};
     int posZ[] = {z + halfSize, z + halfSize, z + halfSize, z + halfSize, z, z, z, z};
 
-    uint64 childOffset = uint64(allocator.size()) - descriptorIndex;
+    uint64 childOffset = uint64(allocator.size()) - descriptorIndex; // cells to skip before putting first child
 
     int childCount = 0;
     int childIndices[8];
@@ -169,7 +176,7 @@ uint64 VoxelOctree::buildOctree(ChunkedAllocator<uint32> &allocator, int x, int 
     } else {
         leafMask = childMask;
         for (int i = 0; i < childCount; i++)
-            allocator.pushBack(0);
+            allocator.pushBack(0); // reserve slot for child's childdesc
 
         uint64 grandChildOffsets[8];
         uint64 delta = 0;
@@ -178,28 +185,28 @@ uint64 VoxelOctree::buildOctree(ChunkedAllocator<uint32> &allocator, int x, int 
             int idx = childIndices[childCount - i - 1];
             grandChildOffsets[i] = delta + buildOctree(allocator, posX[idx], posY[idx], posZ[idx],
                 halfSize, descriptorIndex + childOffset + i);
-            delta += allocator.insertionCount() - insertionCount;
+            delta += allocator.insertionCount() - insertionCount; // add insertions number added in child subtree
             insertionCount = allocator.insertionCount();
-            if (grandChildOffsets[i] > 0x3FFF)
+            if (grandChildOffsets[i] > 0x3FFF) // offset cannot be contained in 14bits
                 hasLargeChildren = true;
         }
 
         for (int i = 0; i < childCount; i++) {
             uint64 childIndex = descriptorIndex + childOffset + i;
             uint64 offset = grandChildOffsets[i];
-            if (hasLargeChildren) {
+            if (hasLargeChildren) { // if at least one childoffset is big, all are treated differently
                 offset += childCount - i;
                 allocator.insert(childIndex + 1, uint32(offset));
-                allocator[childIndex] |= 0x20000;
+                allocator[childIndex] |= 0x20000; // set 18th bit on child's childescriptor // means parent handled the insertion "from above"
                 offset >>= 32;
             }
-            allocator[childIndex] |= uint32(offset << 18);
+            allocator[childIndex] |= uint32(offset << 18); // save the offset in the first 14 bits?
         }
     }
 
-    allocator[descriptorIndex] = (childMask << 8) | leafMask;
+    allocator[descriptorIndex] = (childMask << 8) | leafMask; // save masks in current childdesc
     if (hasLargeChildren)
-        allocator[descriptorIndex] |= 0x10000;
+        allocator[descriptorIndex] |= 0x10000; // set 17th bit in current childdesc if large children
 
     return childOffset;
 }
@@ -261,10 +268,10 @@ bool VoxelOctree::raymarch(const Vec3 &o, const Vec3 &d, float rayScale, uint32 
         int childShift = idx ^ octantMask;
         uint32 childMasks = current << childShift;
 
-        if ((childMasks & 0x8000) && minT <= maxT) {
+        if ((childMasks & 0x8000) && minT <= maxT) { // if childExists and ray not arrived end
             if (maxTC*rayScale >= scaleExp2) {
                 t = maxTC;
-                return true;
+                return true; // TODO // break point here
             }
 
             float maxTV = std::min(maxT, maxTC);
@@ -274,53 +281,54 @@ bool VoxelOctree::raymarch(const Vec3 &o, const Vec3 &d, float rayScale, uint32 
             float centerTZ = half*dTz + cornerTZ;
 
             if (minT <= maxTV) {
-                uint64 childOffset = current >> 18;
-                if (current & 0x20000)
-                    childOffset = (childOffset << 32) | uint64(_octree[parent + 1]);
+                uint64 childOffset = current >> 18; // ignore first 18 bits = 8+8 masks + hasLargeChildren + parent hasLargeChildren (so I've large sibling)
+                                                    // this is used as "pointer" as index of an array of childdescriptors
+                if (current & 0x20000) // 18th // means parent hasLargeChildren // so current has large siblings
+                    childOffset = (childOffset << 32) | uint64(_octree[parent + 1]); // recreate old offset  
 
-                if (!(childMasks & 0x80)) {
-                    normal = _octree[childOffset + parent + BitCount[((childMasks >> (8 + childShift)) << childShift) & 127]];
-
+                if (!(childMasks & 0x80)) { // if leaf
+                    normal = _octree[childOffset + parent + BitCount[((childMasks >> (8 + childShift)) << childShift) & 127]]; // parent+childOffset make "pointer" to first childDescriptor, then BitCount[...] gives another offset for the right childDescriptor, wiht &127 we look only the last 7 bits
                     break;
                 }
 
                 rayStack[scale].offset = parent;
                 rayStack[scale].maxT = maxT;
 
-                uint32 siblingCount = BitCount[childMasks & 127];
+                uint32 siblingCount = BitCount[childMasks & 127]; // use non-leaf mask
                 parent += childOffset + siblingCount;
-                if (current & 0x10000)
+                if (current & 0x10000) // 17th // hasLargeChildren so child occupy x2 space because of insertions
                     parent += siblingCount;
 
                 idx = 0;
                 scale--;
                 scaleExp2 = half;
 
+                // select child and "pull near the voxel opposite corner" because ray travels positive->negative and the corner is the smallest
                 if (centerTX > minT) idx ^= 1, posX += scaleExp2;
                 if (centerTY > minT) idx ^= 2, posY += scaleExp2;
                 if (centerTZ > minT) idx ^= 4, posZ += scaleExp2;
 
                 maxT = maxTV;
-                current = 0;
+                current = 0; // reset current to force fetch on next loop
 
                 continue;
             }
         }
-
+        // ADVANCE
         int stepMask = 0;
-        if (cornerTX <= maxTC) stepMask ^= 1, posX -= scaleExp2;
-        if (cornerTY <= maxTC) stepMask ^= 2, posY -= scaleExp2;
+        if (cornerTX <= maxTC) stepMask ^= 1, posX -= scaleExp2; // "push away the voxel opposite corner" because ray travels positive->negative
+        if (cornerTY <= maxTC) stepMask ^= 2, posY -= scaleExp2; // and idx will become smaller and smaller
         if (cornerTZ <= maxTC) stepMask ^= 4, posZ -= scaleExp2;
 
-        minT = maxTC;
+        minT = maxTC; // move "ray head"
         idx ^= stepMask;
-
+        // POP
         if ((idx & stepMask) != 0) {
             int differingBits = 0;
             if (stepMask & 1) differingBits |= floatBitsToUint(posX) ^ floatBitsToUint(posX + scaleExp2);
             if (stepMask & 2) differingBits |= floatBitsToUint(posY) ^ floatBitsToUint(posY + scaleExp2);
             if (stepMask & 4) differingBits |= floatBitsToUint(posZ) ^ floatBitsToUint(posZ + scaleExp2);
-            scale = (floatBitsToUint((float)differingBits) >> 23) - 127;
+            scale = (floatBitsToUint((float)differingBits) >> 23) - 127; // highest differing bit
             scaleExp2 = uintBitsToFloat((scale - MaxScale + 127) << 23);
 
             parent = rayStack[scale].offset;
@@ -341,6 +349,6 @@ bool VoxelOctree::raymarch(const Vec3 &o, const Vec3 &d, float rayScale, uint32 
     if (scale >= MaxScale)
         return false;
 
-    t = minT;
+    t = minT; // we arrive here with the while break after reaching a leaf
     return true;
 }
