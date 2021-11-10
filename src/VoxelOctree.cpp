@@ -211,7 +211,14 @@ uint64 VoxelOctree::buildOctree(ChunkedAllocator<uint32> &allocator, int x, int 
     return childOffset;
 }
 
-bool VoxelOctree::raymarch(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t) {
+bool VoxelOctree::raymarch(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t, const unsigned int rmode) {
+  if (rmode == 1) {
+    return raymarchSDF(o, d, rayScale, normal, t);
+  }
+  return raymarchV(o, d, rayScale, normal, t);
+}
+
+bool VoxelOctree::raymarchV(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t) {
     struct StackEntry {
         uint64 offset;
         float maxT;
@@ -271,7 +278,7 @@ bool VoxelOctree::raymarch(const Vec3 &o, const Vec3 &d, float rayScale, uint32 
         if ((childMasks & 0x8000) && minT <= maxT) { // if childExists and ray not arrived end
             if (maxTC*rayScale >= scaleExp2) {
                 t = maxTC;
-                return true; // TODO // break point here
+                return true;
             }
 
             float maxTV = std::min(maxT, maxTC);
@@ -352,3 +359,161 @@ bool VoxelOctree::raymarch(const Vec3 &o, const Vec3 &d, float rayScale, uint32 
     t = minT; // we arrive here with the while break after reaching a leaf
     return true;
 }
+
+
+float sdf(const Vec3 &p);
+bool VoxelOctree::raymarchSDF(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t) {
+    struct StackEntry {
+        uint64 offset;
+        float maxT;
+    };
+    StackEntry rayStack[MaxScale + 1];
+
+    float ox = o.x, oy = o.y, oz = o.z;
+    float dx = d.x, dy = d.y, dz = d.z;
+
+    if (std::fabs(dx) < 1e-4f) dx = 1e-4f;
+    if (std::fabs(dy) < 1e-4f) dy = 1e-4f;
+    if (std::fabs(dz) < 1e-4f) dz = 1e-4f;
+
+    float dTx = 1.0f/-std::fabs(dx);
+    float dTy = 1.0f/-std::fabs(dy);
+    float dTz = 1.0f/-std::fabs(dz);
+
+    float bTx = dTx*ox;
+    float bTy = dTy*oy;
+    float bTz = dTz*oz;
+
+    uint8 octantMask = 7;
+    if (dx > 0.0f) octantMask ^= 1, bTx = 3.0f*dTx - bTx;
+    if (dy > 0.0f) octantMask ^= 2, bTy = 3.0f*dTy - bTy;
+    if (dz > 0.0f) octantMask ^= 4, bTz = 3.0f*dTz - bTz;
+
+    float minT = std::max(2.0f*dTx - bTx, std::max(2.0f*dTy - bTy, 2.0f*dTz - bTz));
+    float maxT = std::min(     dTx - bTx, std::min(     dTy - bTy,      dTz - bTz));
+    minT = std::max(minT, 0.0f);
+
+    uint32 current = 0;
+    uint64 parent  = 0;
+    int idx     = 0;
+    float posX  = 1.0f;
+    float posY  = 1.0f;
+    float posZ  = 1.0f;
+    int scale   = MaxScale - 1;
+
+    float scaleExp2 = 0.5f;
+
+    if (1.5f*dTx - bTx > minT) idx ^= 1, posX = 1.5f;
+    if (1.5f*dTy - bTy > minT) idx ^= 2, posY = 1.5f;
+    if (1.5f*dTz - bTz > minT) idx ^= 4, posZ = 1.5f;
+
+    while (scale < MaxScale) {
+        if (current == 0)
+            current = _octree[parent];
+
+        float cornerTX = posX*dTx - bTx;
+        float cornerTY = posY*dTy - bTy;
+        float cornerTZ = posZ*dTz - bTz;
+        float maxTC = std::min(cornerTX, std::min(cornerTY, cornerTZ));
+
+        int childShift = idx ^ octantMask;
+        uint32 childMasks = current << childShift;
+
+        if ((childMasks & 0x8000) && minT <= maxT) { // if childExists and ray not arrived end
+            if (maxTC*rayScale >= scaleExp2) {
+                t = maxTC;
+                return true;
+            }
+
+            float maxTV = std::min(maxT, maxTC);
+            float half = scaleExp2*0.5f;
+            float centerTX = half*dTx + cornerTX;
+            float centerTY = half*dTy + cornerTY;
+            float centerTZ = half*dTz + cornerTZ;
+
+            if (minT <= maxTV) {
+                uint64 childOffset = current >> 18; // ignore first 18 bits = 8+8 masks + hasLargeChildren + parent hasLargeChildren (so I've large sibling)
+                                                    // this is used as "pointer" as index of an array of childdescriptors
+                if (current & 0x20000) // 18th // means parent hasLargeChildren // so current has large siblings
+                    childOffset = (childOffset << 32) | uint64(_octree[parent + 1]); // recreate old offset  
+
+                if (!(childMasks & 0x80)) { // if leaf
+                    normal = _octree[childOffset + parent + BitCount[((childMasks >> (8 + childShift)) << childShift) & 127]]; // parent+childOffset make "pointer" to first childDescriptor, then BitCount[...] gives another offset for the right childDescriptor, wiht &127 we look only the last 7 bits
+                    // TODO work here
+                    // launch sphere tracing and calc t and normal
+                    // not necessarily break
+                    break;
+                }
+
+                rayStack[scale].offset = parent;
+                rayStack[scale].maxT = maxT;
+
+                uint32 siblingCount = BitCount[childMasks & 127]; // use non-leaf mask
+                parent += childOffset + siblingCount;
+                if (current & 0x10000) // 17th // hasLargeChildren so child occupy x2 space because of insertions
+                    parent += siblingCount;
+
+                idx = 0;
+                scale--;
+                scaleExp2 = half;
+
+                // select child and "pull near the voxel opposite corner" because ray travels positive->negative and the corner is the smallest
+                if (centerTX > minT) idx ^= 1, posX += scaleExp2;
+                if (centerTY > minT) idx ^= 2, posY += scaleExp2;
+                if (centerTZ > minT) idx ^= 4, posZ += scaleExp2;
+
+                maxT = maxTV;
+                current = 0; // reset current to force fetch on next loop
+
+                continue;
+            }
+        }
+        // ADVANCE
+        int stepMask = 0;
+        if (cornerTX <= maxTC) stepMask ^= 1, posX -= scaleExp2; // "push away the voxel opposite corner" because ray travels positive->negative
+        if (cornerTY <= maxTC) stepMask ^= 2, posY -= scaleExp2; // and idx will become smaller and smaller
+        if (cornerTZ <= maxTC) stepMask ^= 4, posZ -= scaleExp2;
+
+        minT = maxTC; // move "ray head"
+        idx ^= stepMask;
+        // POP
+        if ((idx & stepMask) != 0) {
+            int differingBits = 0;
+            if (stepMask & 1) differingBits |= floatBitsToUint(posX) ^ floatBitsToUint(posX + scaleExp2);
+            if (stepMask & 2) differingBits |= floatBitsToUint(posY) ^ floatBitsToUint(posY + scaleExp2);
+            if (stepMask & 4) differingBits |= floatBitsToUint(posZ) ^ floatBitsToUint(posZ + scaleExp2);
+            scale = (floatBitsToUint((float)differingBits) >> 23) - 127; // highest differing bit
+            scaleExp2 = uintBitsToFloat((scale - MaxScale + 127) << 23);
+
+            parent = rayStack[scale].offset;
+            maxT   = rayStack[scale].maxT;
+
+            int shX = floatBitsToUint(posX) >> scale;
+            int shY = floatBitsToUint(posY) >> scale;
+            int shZ = floatBitsToUint(posZ) >> scale;
+            posX = uintBitsToFloat(shX << scale);
+            posY = uintBitsToFloat(shY << scale);
+            posZ = uintBitsToFloat(shZ << scale);
+            idx = (shX & 1) | ((shY & 1) << 1) | ((shZ & 1) << 2);
+
+            current = 0;
+        }
+    }
+
+    if (scale >= MaxScale)
+        return false;
+
+    t = minT; // we arrive here with the while break after reaching a leaf
+    return true;
+}
+
+
+
+float sphere(Vec3 p, Vec3 c, float r) {
+  return (p - c).length() - r;
+}
+float sdf(const Vec3 &p) {
+  float r = .3;
+  return sphere(p, Vec3(1,0,0), r);
+}
+

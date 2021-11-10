@@ -54,7 +54,7 @@ freely, subject to the following restrictions:
 #endif
 
 /* Number of threads to use - adapt this to your platform for optimal results */
-static const int NumThreads = 1; //16;
+static const int NumThreads = 16;
 /* Screen resolution */
 static const int GWidth  = 1280;
 static const int GHeight = 720;
@@ -69,6 +69,8 @@ static std::atomic<bool> doTerminate;
 static std::atomic<bool> renderHalfSize;
 
 struct BatchData {
+    unsigned int rmode;
+
     int id;
     int x0, y0;
     int x1, y1;
@@ -90,7 +92,8 @@ Vec3 shade(int intNormal, const Vec3 &ray, const Vec3 &light) {
 }
 
 void renderTile(int x0, int y0, int x1, int y1, int stride, float scale, float zx, float zy, float zz,
-        const Mat4 &tform, const Vec3 &light, VoxelOctree *tree, const Vec3 &pos, float minT) {
+        const Mat4 &tform, const Vec3 &light, VoxelOctree *tree, const Vec3 &pos, float minT,
+        const unsigned int rmode) {
     uint32 *buffer  = (uint32 *)backBuffer->pixels;
     int pitch       = backBuffer->pitch;
 
@@ -115,7 +118,7 @@ void renderTile(int x0, int y0, int x1, int y1, int stride, float scale, float z
             uint32 intNormal;
             float t;
             Vec3 col;
-            if (tree->raymarch(pos + dir*minT, dir, 0.0f, intNormal, t))
+            if (tree->raymarch(pos + dir*minT, dir, 0.0f, intNormal, t, rmode))
                 col = shade(intNormal, dir, light);
 
 #ifdef __APPLE__
@@ -194,7 +197,9 @@ void renderBatch(BatchData *data) {
                     int tx1 = std::min(tx0 + TileSize, x1);
                     int ty1 = std::min(ty0 + TileSize, y1);
                     renderTile(tx0, ty0, tx1, ty1, stride, scale, zx, zy, zz, tform, light, tree, pos,
-                            std::max(minT - 0.03f, 0.0f));
+                            std::max(minT - 0.03f, 0.0f),
+                            data->rmode
+                            );
                 }
             }
         }
@@ -274,17 +279,20 @@ void printHelp() {
     std::cout << "-builder              set program to SVO building mode." << std::endl;
     std::cout << "  --resolution <r>    set voxel resolution. r is an integer which equals to a power of 2." << std::endl;
     std::cout << "  --mode <m>          set where to generate voxel data, m equals 0 or 1, where 0 indicates GENERATE_IN_MEMORY while 1 indicates GENERATE_ON_DISK." << std::endl;
-    std::cout << "-viewer               set program to SVO rendering mode." << std::endl << std::endl;
+    std::cout << "-viewer               set program to SVO rendering mode." << std::endl;
+    std::cout << "  --mode <m>          set tracing algorithm, m equals 0 or 1, where 0 indicates RENDER VOXELS while 1 indicates RENDER SDF." << std::endl << std::endl;
     std::cout << "Examples:" << std::endl;
     std::cout << "  sparse-voxel-octrees -builder --resolution 256 --mode 0 ../models/xyzrgb_dragon.ply ../models/xyzrgb_dragon.oct" << std::endl;
     std::cout << "  sparse-voxel-octrees -builder ../models/xyzrgb_dragon.ply ../models/xyzrgb_dragon.oct" << std::endl;
-    std::cout << "  sparse-voxel-octrees -viewer ../models/XYZRGB-Dragon.oct" << std::endl << std::endl << std::endl;
+    std::cout << "  sparse-voxel-octrees -viewer --mode 0 ../models/XYZRGB-Dragon.oct" << std::endl;
+    std::cout << "  sparse-voxel-octrees -viewer --mode 1 ../models/XYZRGB-Dragon.oct" << std::endl << std::endl << std::endl;
 }
 
 int main(int argc, char *argv[]) {
     
     unsigned int resolution = 256;  //default resolution
     unsigned int mode = 0;          //default to generate in memory
+    unsigned int rmode = 0;         //render mode // default voxel only
     std::string inputFile = "";
     std::string outputFile = "";
     
@@ -299,8 +307,15 @@ int main(int argc, char *argv[]) {
         inputFile = argv[2];
         outputFile = argv[3];
     }
-    else if ((argc == 3) && (std::string(argv[1]) == "-viewer")) 
-        inputFile = argv[2];
+    else if ((argc == 5) && (std::string(argv[1]) == "-viewer")) {
+      rmode = atoi(argv[3]);
+      inputFile = argv[4];
+      if (rmode != 0 && rmode != 1) {
+        std::cout << "Invalid arguments! Please refer to the help info!" << std::endl;
+        printHelp();
+        return 0;
+      }
+    }
     else {
         std::cout << "Invalid arguments! Please refer to the help info!" << std::endl;
         printHelp();
@@ -330,6 +345,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (std::string(argv[1]) == "-viewer")  {
+        
         std::unique_ptr<VoxelOctree> tree(new VoxelOctree(inputFile.c_str()));
 
         timer.bench("Octree initialization took");
@@ -350,6 +366,7 @@ int main(int argc, char *argv[]) {
 
         int stride = (GHeight - 1) / NumThreads + 1;
         for (int i = 0; i < NumThreads; i++) {
+            threadData[i].rmode = rmode;
             threadData[i].id = i;
             threadData[i].tree = tree.get();
             threadData[i].x0 = 0;

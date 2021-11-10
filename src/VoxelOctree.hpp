@@ -49,12 +49,18 @@ public:
     VoxelOctree(const char *path);
     VoxelOctree(VoxelData *voxels);
 
-    void save(const char *path);
-    bool raymarch(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t);
-
     Vec3 center() const {
         return _center;
     }
+
+    void save(const char *path);
+    bool raymarch(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t, const unsigned int rmode=0);
+private:
+    // only voxels
+    bool raymarchV(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t);
+    // voxels and SDF
+    bool raymarchSDF(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t);
+
 };
 
 #endif /* VOXELOCTREE_HPP_ */
