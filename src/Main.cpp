@@ -54,7 +54,7 @@ freely, subject to the following restrictions:
 #endif
 
 /* Number of threads to use - adapt this to your platform for optimal results */
-static const int NumThreads = 16;
+static const int NumThreads = 1; //16;
 /* Screen resolution */
 static const int GWidth  = 1280;
 static const int GHeight = 720;
@@ -181,7 +181,8 @@ void renderBatch(BatchData *data) {
             uint32 intNormal;
             float t;
             Vec3 col;
-            if (tree->raymarch(pos, dir, coarseScale, intNormal, t))
+            //if (tree->raymarch(pos, dir, coarseScale, intNormal, t))
+            if (tree->raymarch(pos, dir, coarseScale, intNormal, t, data->rmode))
                 depthBuffer[idx] = t;
             else
                 depthBuffer[idx] = TreeMiss;

@@ -39,6 +39,9 @@ freely, subject to the following restrictions:
 #include <bitset>
 #include <inttypes.h>
 
+#include <limits>
+constexpr float infinity = std::numeric_limits<float>::max();
+
 
 static const uint32 BitCount[] = {
     0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
@@ -362,15 +365,38 @@ bool VoxelOctree::raymarchV(const Vec3 &o, const Vec3 &d, float rayScale, uint32
 
 
 float sdf(const Vec3 &p);
-bool VoxelOctree::raymarchSDF(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t) {
+inline Vec3 normalAt(const Vec3& p);
+static inline Vec3 unorm_coord(Vec3 nc, Vec3 p0, Vec3 region_dims);
+static constexpr float hit_threshold = 10e-6; // min distance to signal a ray-surface hit
+
+bool VoxelOctree::raymarchSDF(const Vec3 &orig, const Vec3 &dir, float rayScale, uint32 &normal, float &t) {
     struct StackEntry {
         uint64 offset;
         float maxT;
     };
     StackEntry rayStack[MaxScale + 1];
 
-    float ox = o.x, oy = o.y, oz = o.z;
-    float dx = d.x, dy = d.y, dz = d.z;
+    //if (
+    //    //rayScale != 0.f
+    //    //true
+    //    //false
+    //    ) {
+    //  printf("\n");
+    //  printf("orig {%f %f %f}\n",
+    //      orig.x,
+    //      orig.y,
+    //      orig.z
+    //      );
+    //  printf("dir {%f %f %f}\n",
+    //      dir.x,
+    //      dir.y,
+    //      dir.z
+    //      );
+    //}
+
+
+    float ox = orig.x, oy = orig.y, oz = orig.z;
+    float dx = dir.x, dy = dir.y, dz = dir.z;
 
     if (std::fabs(dx) < 1e-4f) dx = 1e-4f;
     if (std::fabs(dy) < 1e-4f) dy = 1e-4f;
@@ -438,11 +464,154 @@ bool VoxelOctree::raymarchSDF(const Vec3 &o, const Vec3 &d, float rayScale, uint
                     childOffset = (childOffset << 32) | uint64(_octree[parent + 1]); // recreate old offset  
 
                 if (!(childMasks & 0x80)) { // if leaf
-                    normal = _octree[childOffset + parent + BitCount[((childMasks >> (8 + childShift)) << childShift) & 127]]; // parent+childOffset make "pointer" to first childDescriptor, then BitCount[...] gives another offset for the right childDescriptor, wiht &127 we look only the last 7 bits
-                    // TODO work here
-                    // launch sphere tracing and calc t and normal
-                    // not necessarily break
+                  // TODO work here
+                  // TODO CRITICAL
+                  // Need to retrieve *world position* to check world points against SDF
+                  //
+                  // launch sphere tracing and calc t and normal
+                  // not necessarily break
+                  // maybe local slow down leads to a miss
+                  //
+
+                  //{
+                  //  Vec3 tmp(.9,-.9,.0);
+                  //  printf("\tmp {%f %f %f}\n",
+                  //      tmp.x,
+                  //      tmp.y,
+                  //      tmp.z
+                  //      );
+                  //  printf("\tdist = %f\n", sdf(tmp));
+                  //  exit(1);
+                  //}
+                  //
+                  //TODO provare ad usare questo?
+                  // forse il tempo calocolato e' sfasato rispetto al tempo calcolato con sphere trace?
+                  // float cornerTX = posX*dTx - bTx;
+                  // float cornerTY = posY*dTy - bTy;
+                  // float cornerTZ = posZ*dTz - bTz;
+                  // float maxTC = std::min(cornerTX, std::min(cornerTY, cornerTZ));
+
+                  //printf("\npos {%f %f %f}\n",
+                  //    posX,
+                  //    posY,
+                  //    posZ
+                  //    );
+
+                  //now from pos to actual world position // TODO maybe not necessary here
+                  Vec3 wpos = unorm_coord(
+                      Vec3(posX,posY,posZ),
+                      Vec3(-2.f,-2.f,-2.f), // TODO parametrize
+                      Vec3(4.f,4.f,4.f)     // TODO parametrize
+                      )
+                    // _region_dims / (1 << _scale) / 2;release
+                    + 4.f / (1 << 3) / 2.f;
+                  //printf("wpos {%f %f %f}\n",
+                  //    wpos.x,
+                  //    wpos.y,
+                  //    wpos.z
+                  //    );
+
+                  //normal = _octree[childOffset + parent + BitCount[((childMasks >> (8 + childShift)) << childShift) & 127]];
+                  // TODO sphere trace here
+                  float t=minT;
+                  float minDistance = infinity;
+                  float dist = infinity;
+                  float max_distance = maxT; //maxTV;
+                  bool hit = false;
+                  //Vec3 p = ray at t  using d and o
+                  //Vec3 p = wpos;
+                  //Vec3 p = orig + t*dir;
+                  Vec3 p = unorm_coord(
+                      orig + t*dir,
+                      Vec3(-2.f,-2.f,-2.f), // TODO parametrize
+                      Vec3(4.f,4.f,4.f)     // TODO parametrize
+                      );
+                  //fix sphere tracing starting position p
+
+                  //printf("orig {%f %f %f}\n",
+                  //    orig.x,
+                  //    orig.y,
+                  //    orig.z
+                  //    );
+                  //printf("dir {%f %f %f}\n",
+                  //    dir.x,
+                  //    dir.y,
+                  //    dir.z
+                  //    );
+
+                  //printf("minT %f\tmaxTV %f\tmaxT %f\n", minT, maxTV, maxT);
+
+                  while (t < max_distance) {
+                    minDistance = infinity; // TODO REMOVEME
+                    dist = sdf(p);
+
+                    //printf("p {%f %f %f}\n",
+                    //    p.x,
+                    //    p.y,
+                    //    p.z
+                    //    );
+                    //printf("dist %f\n",dist);
+
+                    if (dist < minDistance) {
+                      minDistance = dist;
+                    }
+                    // did we intersect the shape?
+                    if (minDistance < 0 ||  minDistance <= hit_threshold * t) {
+                      hit = true;
+                      break;
+                    }
+                    t += minDistance;
+                    //p = update with current t
+                    //p = orig + t*dist;
+                    p = unorm_coord(
+                        orig + t*dir,
+                        Vec3(-2.f,-2.f,-2.f), // TODO parametrize
+                        Vec3(4.f,4.f,4.f)     // TODO parametrize
+                        );
+                  }
+                  // end sphere tracing
+                  if (hit) {
+                    printf("HIT!\n");
+                    exit(1);
+                    normal = compressMaterial(
+                        normalAt(p),
+                        1.0
+                        );
                     break;
+                  } else {
+                    //force ADVANCE
+                    //minT = maxT + 0.0001f;
+
+                    // Placeholder // TODO
+                    //printf("MISS!\n");
+                    normal = compressMaterial(
+                        normalAt(p),
+                        .5
+                        );
+                    break;
+                  }
+
+
+                  ////
+                  //Vec3 n = normalAt(wpos);
+                  //normal = compressMaterial(
+                  //    n,
+                  //    1.0
+                  //    );
+
+                  //printf("n {%f %f %f}\n",
+                  //    n.x,
+                  //    n.y,
+                  //    n.z
+                  //    );
+
+                  //printf("Octree center {%f %f %f}\n",
+                  //    _center.x,
+                  //    _center.y,
+                  //    _center.z
+                  //    );
+                  //exit(1);
+                  //break;
                 }
 
                 rayStack[scale].offset = parent;
@@ -512,8 +681,26 @@ bool VoxelOctree::raymarchSDF(const Vec3 &o, const Vec3 &d, float rayScale, uint
 float sphere(Vec3 p, Vec3 c, float r) {
   return (p - c).length() - r;
 }
+//float sdf(const Vec3 &p) {
+//  float r = .3;
+//  return sphere(p, Vec3(1,0,0), r);
+//}
 float sdf(const Vec3 &p) {
-  float r = .3;
-  return sphere(p, Vec3(1,0,0), r);
+  // example for flat index compression
+  float r = .4;
+  return sphere(p, Vec3(.5,0,.5), r);
 }
+static constexpr float gradient_delta = 10e-5; // delta used to compute gradient (normal)
+inline Vec3 normalAt(const Vec3& p) {
+  return (Vec3(
+        sdf(p + Vec3(gradient_delta,0,0)) - sdf(p + Vec3(-gradient_delta,0,0)),
+        sdf(p + Vec3(0,gradient_delta,0)) - sdf(p + Vec3(0,-gradient_delta,0)),
+        sdf(p + Vec3(0,0,gradient_delta)) - sdf(p + Vec3(0,0,-gradient_delta)))
+      ).normalize();
+}
+
+static inline Vec3 unorm_coord(Vec3 nc, Vec3 p0, Vec3 region_dims) {
+  return (nc - Vec3(1.0)) * region_dims + p0;
+}
+
 
