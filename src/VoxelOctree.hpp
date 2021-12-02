@@ -60,6 +60,8 @@ private:
     bool raymarchV(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t);
     // voxels and SDF
     bool raymarchSDF(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t);
+    // only SDF
+    bool pureSphereTracing(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t);
 
 };
 

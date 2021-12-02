@@ -281,7 +281,7 @@ void printHelp() {
     std::cout << "  --resolution <r>    set voxel resolution. r is an integer which equals to a power of 2." << std::endl;
     std::cout << "  --mode <m>          set where to generate voxel data, m equals 0 or 1, where 0 indicates GENERATE_IN_MEMORY while 1 indicates GENERATE_ON_DISK." << std::endl;
     std::cout << "-viewer               set program to SVO rendering mode." << std::endl;
-    std::cout << "  --mode <m>          set tracing algorithm, m equals 0 or 1, where 0 indicates RENDER VOXELS while 1 indicates RENDER SDF." << std::endl << std::endl;
+    std::cout << "  --mode <m>          set tracing algorithm, m equals 0 or 1, where 0 indicates RENDER VOXELS, 1 indicates RENDER VOXEL+SDF, and 2 RENDER ONLY SDF." << std::endl << std::endl;
     std::cout << "Examples:" << std::endl;
     std::cout << "  sparse-voxel-octrees -builder --resolution 256 --mode 0 ../models/xyzrgb_dragon.ply ../models/xyzrgb_dragon.oct" << std::endl;
     std::cout << "  sparse-voxel-octrees -builder ../models/xyzrgb_dragon.ply ../models/xyzrgb_dragon.oct" << std::endl;
@@ -311,7 +311,7 @@ int main(int argc, char *argv[]) {
     else if ((argc == 5) && (std::string(argv[1]) == "-viewer")) {
       rmode = atoi(argv[3]);
       inputFile = argv[4];
-      if (rmode != 0 && rmode != 1) {
+      if (rmode != 0 && rmode != 1 && rmode != 2) {
         std::cout << "Invalid arguments! Please refer to the help info!" << std::endl;
         printHelp();
         return 0;

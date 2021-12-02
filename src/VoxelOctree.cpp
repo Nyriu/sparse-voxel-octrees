@@ -218,6 +218,9 @@ bool VoxelOctree::raymarch(const Vec3 &o, const Vec3 &d, float rayScale, uint32 
   if (rmode == 1) {
     return raymarchSDF(o, d, rayScale, normal, t);
   }
+  if (rmode == 2) {
+    return pureSphereTracing(o, d, rayScale, normal, t);
+  }
   return raymarchV(o, d, rayScale, normal, t);
 }
 
@@ -471,147 +474,17 @@ bool VoxelOctree::raymarchSDF(const Vec3 &orig, const Vec3 &dir, float rayScale,
                   // launch sphere tracing and calc t and normal
                   // not necessarily break
                   // maybe local slow down leads to a miss
-                  //
 
-                  //{
-                  //  Vec3 tmp(.9,-.9,.0);
-                  //  printf("\tmp {%f %f %f}\n",
-                  //      tmp.x,
-                  //      tmp.y,
-                  //      tmp.z
-                  //      );
-                  //  printf("\tdist = %f\n", sdf(tmp));
-                  //  exit(1);
-                  //}
-                  //
-                  //TODO provare ad usare questo?
-                  // forse il tempo calocolato e' sfasato rispetto al tempo calcolato con sphere trace?
-                  // float cornerTX = posX*dTx - bTx;
-                  // float cornerTY = posY*dTy - bTy;
-                  // float cornerTZ = posZ*dTz - bTz;
-                  // float maxTC = std::min(cornerTX, std::min(cornerTY, cornerTZ));
+                  bool hit = pureSphereTracing(
+                      orig + minT*dir,
+                      dir,
+                      rayScale,
+                      normal,t);
 
-                  //printf("\npos {%f %f %f}\n",
-                  //    posX,
-                  //    posY,
-                  //    posZ
-                  //    );
-
-                  //now from pos to actual world position // TODO maybe not necessary here
-                  Vec3 wpos = unorm_coord(
-                      Vec3(posX,posY,posZ),
-                      Vec3(-2.f,-2.f,-2.f), // TODO parametrize
-                      Vec3(4.f,4.f,4.f)     // TODO parametrize
-                      )
-                    // _region_dims / (1 << _scale) / 2;release
-                    + 4.f / (1 << 3) / 2.f;
-                  //printf("wpos {%f %f %f}\n",
-                  //    wpos.x,
-                  //    wpos.y,
-                  //    wpos.z
-                  //    );
-
-                  //normal = _octree[childOffset + parent + BitCount[((childMasks >> (8 + childShift)) << childShift) & 127]];
-                  // TODO sphere trace here
-                  float t=minT;
-                  float minDistance = infinity;
-                  float dist = infinity;
-                  float max_distance = maxT; //maxTV;
-                  bool hit = false;
-                  //Vec3 p = ray at t  using d and o
-                  //Vec3 p = wpos;
-                  //Vec3 p = orig + t*dir;
-                  Vec3 p = unorm_coord(
-                      orig + t*dir,
-                      Vec3(-2.f,-2.f,-2.f), // TODO parametrize
-                      Vec3(4.f,4.f,4.f)     // TODO parametrize
-                      );
-                  //fix sphere tracing starting position p
-
-                  //printf("orig {%f %f %f}\n",
-                  //    orig.x,
-                  //    orig.y,
-                  //    orig.z
-                  //    );
-                  //printf("dir {%f %f %f}\n",
-                  //    dir.x,
-                  //    dir.y,
-                  //    dir.z
-                  //    );
-
-                  //printf("minT %f\tmaxTV %f\tmaxT %f\n", minT, maxTV, maxT);
-
-                  while (t < max_distance) {
-                    minDistance = infinity; // TODO REMOVEME
-                    dist = sdf(p);
-
-                    //printf("p {%f %f %f}\n",
-                    //    p.x,
-                    //    p.y,
-                    //    p.z
-                    //    );
-                    //printf("dist %f\n",dist);
-
-                    if (dist < minDistance) {
-                      minDistance = dist;
-                    }
-                    // did we intersect the shape?
-                    if (minDistance < 0 ||  minDistance <= hit_threshold * t) {
-                      hit = true;
-                      break;
-                    }
-                    t += minDistance;
-                    //p = update with current t
-                    //p = orig + t*dist;
-                    p = unorm_coord(
-                        orig + t*dir,
-                        Vec3(-2.f,-2.f,-2.f), // TODO parametrize
-                        Vec3(4.f,4.f,4.f)     // TODO parametrize
-                        );
-                  }
-                  // end sphere tracing
-                  if (hit) {
-                    printf("HIT!\n");
-                    exit(1);
-                    normal = compressMaterial(
-                        normalAt(p),
-                        1.0
-                        );
+                  //if (hit) {
                     break;
-                  } else {
-                    //force ADVANCE
-                    //minT = maxT + 0.0001f;
-
-                    // Placeholder // TODO
-                    //printf("MISS!\n");
-                    normal = compressMaterial(
-                        normalAt(p),
-                        .5
-                        );
-                    break;
-                  }
-
-
-                  ////
-                  //Vec3 n = normalAt(wpos);
-                  //normal = compressMaterial(
-                  //    n,
-                  //    1.0
-                  //    );
-
-                  //printf("n {%f %f %f}\n",
-                  //    n.x,
-                  //    n.y,
-                  //    n.z
-                  //    );
-
-                  //printf("Octree center {%f %f %f}\n",
-                  //    _center.x,
-                  //    _center.y,
-                  //    _center.z
-                  //    );
-                  //exit(1);
-                  //break;
+                  //};
+                  //if miss force ADVANCE
                 }
 
                 rayStack[scale].offset = parent;
@@ -676,6 +549,74 @@ bool VoxelOctree::raymarchSDF(const Vec3 &orig, const Vec3 &dir, float rayScale,
     return true;
 }
 
+bool VoxelOctree::pureSphereTracing(const Vec3 &orig, const Vec3 &dir, float rayScale, uint32 &normal, float &t) {
+  //if (rayScale !=0) { // no coarse tracing
+  //  // placeholder
+  //  // TODO cones?
+  //  normal = compressMaterial(
+  //      Vec3(1,1,1).normalize(),
+  //      1.0
+  //      );
+  //  t = 0.0f;
+  //  return true;
+  //}
+
+  Vec3 worig = unorm_coord(
+      orig,
+      Vec3(-2.f,-2.f,-2.f), // TODO parametrize
+      Vec3(4.f,4.f,4.f)     // TODO parametrize
+      );
+  Vec3 wdir = dir;
+
+  float ti=0.0f;
+  float minDistance = infinity;
+  float dist = infinity;
+  float max_distance = 100; //1e10; // TODO
+  bool hit = false;
+  Vec3 p = worig;
+  while (ti < max_distance) {
+    ///  TODO HERE  ///
+    minDistance = infinity; // TODO REMOVEME
+    dist = sdf(p);
+
+    if (dist < minDistance) {
+      minDistance = dist;
+    }
+
+    auto tmp = ti * rayScale;
+
+    // did we intersect the shape?
+    if (minDistance < 0 ||
+        minDistance <= hit_threshold + ti * rayScale) {
+      hit = true;
+      break;
+    }
+    ti += minDistance;
+    p = worig + ti*dir;
+  }
+
+  if (hit) {
+    normal = compressMaterial(
+        normalAt(p),
+        1.0
+        );
+  } else {
+    normal = compressMaterial(
+        Vec3(1,1,1).normalize(),
+        1.0
+        );
+  }
+
+
+  if (rayScale != 0) {
+    //t = ti - ti*rayScale;
+    t = ti - 5;
+  } else {
+    t = ti;
+  }
+  return hit;
+}
+
 
 
 float sphere(Vec3 p, Vec3 c, float r) {
@@ -688,7 +629,13 @@ float sphere(Vec3 p, Vec3 c, float r) {
 float sdf(const Vec3 &p) {
   // example for flat index compression
   float r = .4;
+  // TODO putting camera orig here is an awful hack
+  //Vec3 camera_orig(1.5, 1.5, 0.0);
+  //return sphere(p, Vec3(.5,0,.5)+camera_orig, r);
+  
   return sphere(p, Vec3(.5,0,.5), r);
+
+  //return sphere(p, Vec3(1.5,1.5,2.5), r);
 }
 static constexpr float gradient_delta = 10e-5; // delta used to compute gradient (normal)
 inline Vec3 normalAt(const Vec3& p) {
