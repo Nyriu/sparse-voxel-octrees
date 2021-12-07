@@ -61,7 +61,10 @@ private:
     // voxels and SDF
     bool raymarchSDF(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t);
     // only SDF
-    bool pureSphereTracing(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t);
+    bool pureSphereTracing(const Vec3 &orig, const Vec3 &dir, float rayScale, uint32 &normal, float &t,
+        //float max_distance=1e10
+        float max_distance=1e2
+        );
 
 };
 

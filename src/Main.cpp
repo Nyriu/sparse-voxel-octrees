@@ -93,7 +93,11 @@ Vec3 shade(int intNormal, const Vec3 &ray, const Vec3 &light) {
 
 void renderTile(int x0, int y0, int x1, int y1, int stride, float scale, float zx, float zy, float zz,
         const Mat4 &tform, const Vec3 &light, VoxelOctree *tree, const Vec3 &pos, float minT,
-        const unsigned int rmode) {
+        const unsigned int rmode,
+        // TODO REMOVE BELOW ARGS
+        float *depthBuffer,
+        int idx, int tilesX
+        ) {
     uint32 *buffer  = (uint32 *)backBuffer->pixels;
     int pitch       = backBuffer->pitch;
 
@@ -115,11 +119,22 @@ void renderTile(int x0, int y0, int x1, int y1, int stride, float scale, float z
             );
             dir *= invSqrt(dir.x*dir.x + dir.y*dir.y + dir.z*dir.z);
 
+
+            Vec3 col;
+
+            bool show_depthBuffer = true; // TODO REMOVE
             uint32 intNormal;
             float t;
-            Vec3 col;
-            if (tree->raymarch(pos + dir*minT, dir, 0.0f, intNormal, t, rmode))
-                col = shade(intNormal, dir, light);
+            if (tree->raymarch(pos + dir*minT, dir, 0.0f, intNormal, t, rmode)) {
+              col = shade(intNormal, dir, light);
+            } else if (show_depthBuffer) {
+              col = Vec3(
+                  std::min(std::min(depthBuffer[idx], depthBuffer[idx - 1]),
+                    std::min(depthBuffer[idx - tilesX],
+                      depthBuffer[idx - tilesX - 1]))
+                  ,
+                  0,0);
+            }
 
 #ifdef __APPLE__
             uint32 color =
@@ -199,7 +214,10 @@ void renderBatch(BatchData *data) {
                     int ty1 = std::min(ty0 + TileSize, y1);
                     renderTile(tx0, ty0, tx1, ty1, stride, scale, zx, zy, zz, tform, light, tree, pos,
                             std::max(minT - 0.03f, 0.0f),
-                            data->rmode
+                            data->rmode,
+                            // TODO REMOVE BELOW ARGS
+                            depthBuffer,
+                            idx, tilesX
                             );
                 }
             }

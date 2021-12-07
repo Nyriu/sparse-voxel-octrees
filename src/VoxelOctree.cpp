@@ -215,10 +215,13 @@ uint64 VoxelOctree::buildOctree(ChunkedAllocator<uint32> &allocator, int x, int 
 }
 
 bool VoxelOctree::raymarch(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t, const unsigned int rmode) {
+  float rayScale_factor = 1.f/10.f;
   if (rmode == 1) {
+    rayScale *= rayScale_factor;
     return raymarchSDF(o, d, rayScale, normal, t);
   }
   if (rmode == 2) {
+    rayScale *= rayScale_factor;
     return pureSphereTracing(o, d, rayScale, normal, t);
   }
   return raymarchV(o, d, rayScale, normal, t);
@@ -479,12 +482,20 @@ bool VoxelOctree::raymarchSDF(const Vec3 &orig, const Vec3 &dir, float rayScale,
                       orig + minT*dir,
                       dir,
                       rayScale,
-                      normal,t);
+                      normal,t // out
+                      //,maxTV
+                      );
 
-                  //if (hit) {
+                  if (hit) {
                     break;
-                  //};
-                  //if miss force ADVANCE
+                  } else {
+                    //break; // TODO to show gross depth
+                    //return false; // TODO tmp solution
+
+                    //if miss force ADVANCE
+                    minT = maxT + 0.000001f;
+                    continue;
+                  }
                 }
 
                 rayStack[scale].offset = parent;
@@ -549,49 +560,31 @@ bool VoxelOctree::raymarchSDF(const Vec3 &orig, const Vec3 &dir, float rayScale,
     return true;
 }
 
-bool VoxelOctree::pureSphereTracing(const Vec3 &orig, const Vec3 &dir, float rayScale, uint32 &normal, float &t) {
-  //if (rayScale !=0) { // no coarse tracing
-  //  // placeholder
-  //  // TODO cones?
-  //  normal = compressMaterial(
-  //      Vec3(1,1,1).normalize(),
-  //      1.0
-  //      );
-  //  t = 0.0f;
-  //  return true;
-  //}
-
+bool VoxelOctree::pureSphereTracing(const Vec3 &orig, const Vec3 &dir, float rayScale, uint32 &normal, float &t, float max_distance) {
   Vec3 worig = unorm_coord(
       orig,
       Vec3(-2.f,-2.f,-2.f), // TODO parametrize
       Vec3(4.f,4.f,4.f)     // TODO parametrize
       );
-  Vec3 wdir = dir;
 
   float ti=0.0f;
   float minDistance = infinity;
   float dist = infinity;
-  float max_distance = 100; //1e10; // TODO
   bool hit = false;
   Vec3 p = worig;
   while (ti < max_distance) {
-    ///  TODO HERE  ///
-    minDistance = infinity; // TODO REMOVEME
     dist = sdf(p);
 
     if (dist < minDistance) {
       minDistance = dist;
     }
 
-    auto tmp = ti * rayScale;
-
     // did we intersect the shape?
-    if (minDistance < 0 ||
-        minDistance <= hit_threshold + ti * rayScale) {
+    if (minDistance <= hit_threshold + ti * rayScale) {
       hit = true;
       break;
     }
-    ti += minDistance;
+    ti += dist;
     p = worig + ti*dir;
   }
 
@@ -629,13 +622,7 @@ float sphere(Vec3 p, Vec3 c, float r) {
 float sdf(const Vec3 &p) {
   // example for flat index compression
   float r = .4;
-  // TODO putting camera orig here is an awful hack
-  //Vec3 camera_orig(1.5, 1.5, 0.0);
-  //return sphere(p, Vec3(.5,0,.5)+camera_orig, r);
-  
   return sphere(p, Vec3(.5,0,.5), r);
-
-  //return sphere(p, Vec3(1.5,1.5,2.5), r);
 }
 static constexpr float gradient_delta = 10e-5; // delta used to compute gradient (normal)
 inline Vec3 normalAt(const Vec3& p) {
