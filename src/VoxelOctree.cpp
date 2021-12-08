@@ -215,13 +215,13 @@ uint64 VoxelOctree::buildOctree(ChunkedAllocator<uint32> &allocator, int x, int 
 }
 
 bool VoxelOctree::raymarch(const Vec3 &o, const Vec3 &d, float rayScale, uint32 &normal, float &t, const unsigned int rmode) {
-  float rayScale_factor = 1.f/10.f;
+  //float rayScale_factor = 1.f/15.f;
   if (rmode == 1) {
-    rayScale *= rayScale_factor;
+    //rayScale *= rayScale_factor;
     return raymarchSDF(o, d, rayScale, normal, t);
   }
   if (rmode == 2) {
-    rayScale *= rayScale_factor;
+    //rayScale *= rayScale_factor;
     return pureSphereTracing(o, d, rayScale, normal, t);
   }
   return raymarchV(o, d, rayScale, normal, t);
